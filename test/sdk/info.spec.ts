@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { KLinePeriod } from "../../sdk/enums";
-import { getKLines } from "../../sdk/info";
+import { KLinePeriod } from "../../src/sdk/enums";
+import { getKLines } from "../../src/sdk/info";
 
 describe("info test cases", async () => {
   test("getKLines", async () => {
