@@ -1,5 +1,4 @@
 use crate::sdk::{KLine, OrderSide, TradeRecord};
-use chrono::{Local, TimeZone};
 use std::sync::{Arc, Mutex};
 use ta::{
     indicators::{ExponentialMovingAverage, RelativeStrengthIndex},
@@ -8,7 +7,8 @@ use ta::{
 use tokio::sync::mpsc::Receiver;
 
 pub struct ThreeBarStrategyOptions {
-    pub fee_percent: f64,
+    pub entry_fee_percent: f64,
+    pub leave_fee_percent: f64,
     pub ema_period: usize,
     pub rsi_period: usize,
     pub rsi_top: f64,
@@ -22,7 +22,8 @@ pub struct ThreeBarStrategy {
     klines: Vec<KLine>,
     ema: ExponentialMovingAverage,
     rsi: RelativeStrengthIndex,
-    fee_percent: f64,
+    entry_fee_percent: f64,
+    leave_fee_percent: f64,
     rsi_top: f64,
     rsi_bottom: f64,
     rsi_over_bought: f64,
@@ -52,15 +53,16 @@ impl ThreeBarStrategy {
 
         {
             let mut record = trade_record.lock().unwrap();
-            record.set_entry_fee_percent(0.0002);
-            record.set_leave_fee_percent(options.fee_percent);
+            record.set_entry_fee_percent(options.entry_fee_percent);
+            record.set_leave_fee_percent(options.leave_fee_percent);
         }
 
         Self {
             klines: initial_klines,
             ema,
             rsi,
-            fee_percent: options.fee_percent,
+            entry_fee_percent: options.entry_fee_percent,
+            leave_fee_percent: options.leave_fee_percent,
             rsi_top: options.rsi_top,
             rsi_bottom: options.rsi_bottom,
             rsi_over_bought: options.rsi_over_bought,
@@ -106,7 +108,9 @@ impl ThreeBarStrategy {
                 self.d_value = Some((self.klines[0].close_price - self.klines[2].open_price).abs());
 
                 if let Some(d_value) = self.d_value {
-                    if (d_value / self.klines[2].open_price) > self.fee_percent * 3.0 {
+                    if (d_value / self.klines[2].open_price)
+                        > self.entry_fee_percent + self.leave_fee_percent
+                    {
                         let is_bullish = bullish_pattern
                             && self.klines[0].close_price > ema
                             && if self.ignore_rsi {

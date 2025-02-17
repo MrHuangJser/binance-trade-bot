@@ -121,12 +121,13 @@ impl TradeRecord {
         let total_fee: f64 = self.records.iter().map(|r| r.fee.unwrap_or(0.0)).sum();
 
         println!(
-            "交易次数: {}\n盈利次数: {}\n亏损次数: {}\n盈利总额: {:.2}\n胜率: {:.2}%\n手续费: {:.2}",
+            "交易次数: {}\n盈利次数: {}\n亏损次数: {}\n总额: {:.2}\n胜率: {:.2}%\n收益率: {:.2}%\n手续费: {:.2}",
             total,
             profit_count,
             loss_count,
-            total_profit,
+            self.money,
             (profit_count as f64 / total as f64) * 100.0,
+            (total_profit / 1000.0) * 100.0,
             total_fee
         );
     }
