@@ -1,3 +1,5 @@
+import { prepareData } from "../backtest/preare-data";
+import { KLinePeriod } from "../sdk/enums";
 import type { KLine } from "../sdk/types";
 import { FasterEMA, RSI } from "trading-signals";
 
