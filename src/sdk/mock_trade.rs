@@ -106,12 +106,12 @@ impl TradeRecord {
         let profit_count = self
             .records
             .iter()
-            .filter(|r| r.real_profit.unwrap_or(0.0) > 0.0)
+            .filter(|r| r.profit.unwrap_or(0.0) > 0.0)
             .count();
         let loss_count = self
             .records
             .iter()
-            .filter(|r| r.real_profit.unwrap_or(0.0) < 0.0)
+            .filter(|r| r.profit.unwrap_or(0.0) < 0.0)
             .count();
         let total_profit: f64 = self
             .records

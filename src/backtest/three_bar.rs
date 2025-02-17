@@ -32,8 +32,8 @@ pub async fn run_backtest() {
 
     let mut strategy = ThreeBarStrategy::new(
         ThreeBarStrategyOptions {
-            tp_percent: 1.0,
-            sl_percent: 0.5,
+            tp_percent: 2.0,
+            sl_percent: 2.0,
             entry_fee_percent: 0.0002,
             leave_fee_percent: 0.0005,
             ema_period: 20,
@@ -43,7 +43,7 @@ pub async fn run_backtest() {
             rsi_over_bought: 100.0,
             rsi_over_sell: 0.0,
             ignore_rsi: true,
-            ignore_ema: true,
+            ignore_ema: false,
         },
         trade_record.clone(),
         Vec::new(),
