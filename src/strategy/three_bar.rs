@@ -7,6 +7,8 @@ use ta::{
 use tokio::sync::mpsc::Receiver;
 
 pub struct ThreeBarStrategyOptions {
+    pub tp_percent: f64,
+    pub sl_percent: f64,
     pub entry_fee_percent: f64,
     pub leave_fee_percent: f64,
     pub ema_period: usize,
@@ -16,12 +18,15 @@ pub struct ThreeBarStrategyOptions {
     pub rsi_over_bought: f64,
     pub rsi_over_sell: f64,
     pub ignore_rsi: bool,
+    pub ignore_ema: bool,
 }
 
 pub struct ThreeBarStrategy {
     klines: Vec<KLine>,
     ema: ExponentialMovingAverage,
     rsi: RelativeStrengthIndex,
+    tp_percent: f64,
+    sl_percent: f64,
     entry_fee_percent: f64,
     leave_fee_percent: f64,
     rsi_top: f64,
@@ -34,6 +39,7 @@ pub struct ThreeBarStrategy {
     d_value: Option<f64>,
     trade_record: Arc<Mutex<TradeRecord>>,
     ignore_rsi: bool,
+    ignore_ema: bool,
 }
 
 impl ThreeBarStrategy {
@@ -61,6 +67,8 @@ impl ThreeBarStrategy {
             klines: initial_klines,
             ema,
             rsi,
+            tp_percent: options.tp_percent,
+            sl_percent: options.sl_percent,
             entry_fee_percent: options.entry_fee_percent,
             leave_fee_percent: options.leave_fee_percent,
             rsi_top: options.rsi_top,
@@ -73,6 +81,7 @@ impl ThreeBarStrategy {
             d_value: None,
             trade_record,
             ignore_rsi: options.ignore_rsi,
+            ignore_ema: options.ignore_ema,
         }
     }
 
@@ -112,7 +121,11 @@ impl ThreeBarStrategy {
                         > self.entry_fee_percent + self.leave_fee_percent
                     {
                         let is_bullish = bullish_pattern
-                            && self.klines[0].close_price > ema
+                            && if self.ignore_ema {
+                                true
+                            } else {
+                                self.klines[0].close_price > ema
+                            }
                             && if self.ignore_rsi {
                                 true
                             } else {
@@ -120,7 +133,11 @@ impl ThreeBarStrategy {
                             };
 
                         let is_bearish = bearish_pattern
-                            && self.klines[0].close_price < ema
+                            && if self.ignore_ema {
+                                true
+                            } else {
+                                self.klines[0].close_price < ema
+                            }
                             && if self.ignore_rsi {
                                 true
                             } else {
@@ -128,7 +145,11 @@ impl ThreeBarStrategy {
                             };
 
                         let is_bullish_over_bought = bullish_pattern
-                            && self.klines[0].close_price > ema
+                            && if self.ignore_ema {
+                                true
+                            } else {
+                                self.klines[0].close_price > ema
+                            }
                             && if self.ignore_rsi {
                                 true
                             } else {
@@ -136,8 +157,16 @@ impl ThreeBarStrategy {
                             };
 
                         let is_bearish_over_sell = bearish_pattern
-                            && self.klines[0].close_price < ema
-                            && rsi <= self.rsi_over_sell;
+                            && if self.ignore_ema {
+                                true
+                            } else {
+                                self.klines[0].close_price < ema
+                            }
+                            && if self.ignore_rsi {
+                                true
+                            } else {
+                                rsi <= self.rsi_over_sell
+                            };
 
                         let entry_price = self.klines[0].close_price;
 
@@ -181,12 +210,12 @@ impl ThreeBarStrategy {
 
         match side {
             OrderSide::Buy => {
-                self.tp_price = Some(price + d_value);
-                self.sl_price = Some(price - d_value);
+                self.tp_price = Some(price + d_value * self.tp_percent);
+                self.sl_price = Some(price - d_value * self.sl_percent);
             }
             OrderSide::Sell => {
-                self.tp_price = Some(price - d_value);
-                self.sl_price = Some(price + d_value);
+                self.tp_price = Some(price - d_value * self.tp_percent);
+                self.sl_price = Some(price + d_value * self.sl_percent);
             }
         }
 
