@@ -1,18 +1,19 @@
 [package]
-name = "trading-bot"
+name = "binance-data-downloader"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["blocking"] }
+quick-xml = { version = "0.31", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-hmac = "0.12"
-sha2 = "0.10"
-hex = "0.4"
-dotenv = "0.15"
-reqwest = { version = "0.11", features = ["json"] }
+zip = "0.6"
 chrono = "0.4"
-ta = "0.5"
-sqlite = "0.31"
-lazy_static = "1.4" 
+anyhow = "1.0"
+tempfile = "3.8"
+csv = "1.3"
+barter = "0.9.1"
+ta = "0.4"
+barter-data = "0.9.1"
+barter-integration = "0.8.0"
+barter-instrument = "0.2.0"

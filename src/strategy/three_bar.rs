@@ -1,242 +1,77 @@
-use crate::sdk::{KLine, OrderSide, TradeRecord};
-use std::sync::{Arc, Mutex};
-use ta::{
-    indicators::{ExponentialMovingAverage, RelativeStrengthIndex},
-    Next,
+use barter::{
+    data::market::MarketDataEvent,
+    engine::state::position::Position,
+    execution::model::{ExecutionRequest, Order},
+    indicator::{ma::ExponentialMovingAverage, Value},
+    statistic::metrics::rsi::RelativeStrengthIndex,
+    strategy::algo::AlgoStrategy,
 };
-use tokio::sync::mpsc::Receiver;
+use std::collections::VecDeque;
 
-pub struct ThreeBarStrategyOptions {
-    pub tp_percent: f64,
-    pub sl_percent: f64,
-    pub entry_fee_percent: f64,
-    pub leave_fee_percent: f64,
-    pub ema_period: usize,
-    pub rsi_period: usize,
-    pub rsi_top: f64,
-    pub rsi_bottom: f64,
-    pub rsi_over_bought: f64,
-    pub rsi_over_sell: f64,
-    pub ignore_rsi: bool,
-    pub ignore_ema: bool,
-}
+#[derive(Debug)]
+pub struct TripleBarStrategy {
+    // 可配置参数
+    params: StrategyParams,
 
-pub struct ThreeBarStrategy {
-    klines: Vec<KLine>,
+    // 状态维护
+    candles: VecDeque<Candle>,
     ema: ExponentialMovingAverage,
     rsi: RelativeStrengthIndex,
-    tp_percent: f64,
-    sl_percent: f64,
-    entry_fee_percent: f64,
-    leave_fee_percent: f64,
-    rsi_top: f64,
-    rsi_bottom: f64,
-    rsi_over_bought: f64,
-    rsi_over_sell: f64,
-    has_order: bool,
-    tp_price: Option<f64>,
-    sl_price: Option<f64>,
-    d_value: Option<f64>,
-    trade_record: Arc<Mutex<TradeRecord>>,
-    ignore_rsi: bool,
-    ignore_ema: bool,
 }
 
-impl ThreeBarStrategy {
-    pub fn new(
-        options: ThreeBarStrategyOptions,
-        trade_record: Arc<Mutex<TradeRecord>>,
-        initial_klines: Vec<KLine>,
-    ) -> Self {
-        let mut ema = ExponentialMovingAverage::new(options.ema_period).unwrap();
-        let mut rsi = RelativeStrengthIndex::new(options.rsi_period).unwrap();
+#[derive(Debug, Clone)]
+struct StrategyParams {
+    ema_period: usize,
+    rsi_period: usize,
+    rsi_upper: f64,
+    rsi_lower: f64,
+    min_amplitude: f64,
+}
 
-        // 初始化指标
-        for kline in &initial_klines {
-            ema.next(kline.close_price);
-            rsi.next(kline.close_price);
-        }
+#[derive(Debug)]
+struct Candle {
+    open: f64,
+    close: f64,
+    timestamp: i64,
+}
 
-        {
-            let mut record = trade_record.lock().unwrap();
-            record.set_entry_fee_percent(options.entry_fee_percent);
-            record.set_leave_fee_percent(options.leave_fee_percent);
-        }
+impl AlgoStrategy for TripleBarStrategy {
+    type Event = MarketDataEvent;
+    type Params = StrategyParams;
+    type Signal = ExecutionRequest;
 
+    fn new(params: Self::Params) -> Self {
         Self {
-            klines: initial_klines,
-            ema,
-            rsi,
-            tp_percent: options.tp_percent,
-            sl_percent: options.sl_percent,
-            entry_fee_percent: options.entry_fee_percent,
-            leave_fee_percent: options.leave_fee_percent,
-            rsi_top: options.rsi_top,
-            rsi_bottom: options.rsi_bottom,
-            rsi_over_bought: options.rsi_over_bought,
-            rsi_over_sell: options.rsi_over_sell,
-            has_order: false,
-            tp_price: None,
-            sl_price: None,
-            d_value: None,
-            trade_record,
-            ignore_rsi: options.ignore_rsi,
-            ignore_ema: options.ignore_ema,
+            params,
+            candles: VecDeque::with_capacity(3),
+            ema: ExponentialMovingAverage::new(params.ema_period),
+            rsi: RelativeStrengthIndex::new(params.rsi_period),
         }
     }
 
-    pub async fn run(&mut self, mut rx: Receiver<KLine>) {
-        while let Some(kline) = rx.recv().await {
-            self.entry(&kline);
-            self.leave(&kline);
+    fn on_market_data(&mut self, event: &Self::Event) -> Vec<Self::Signal> {
+        // 更新K线数据
+        self.update_candle(event);
 
-            self.klines.insert(0, kline.clone());
-            if self.klines.len() > 10 {
-                self.klines.truncate(10);
-            }
-
-            self.ema.next(kline.close_price);
-            self.rsi.next(kline.close_price);
-        }
-    }
-
-    fn entry(&mut self, current_kline: &KLine) {
-        if !self.has_order {
-            let ema = self.ema.next(current_kline.close_price);
-            let rsi = self.rsi.next(current_kline.close_price);
-
-            if self.klines.len() >= 3 {
-                let bullish_pattern = self.klines[2].close_price > self.klines[2].open_price
-                    && self.klines[1].close_price > self.klines[1].open_price
-                    && self.klines[0].close_price > self.klines[0].open_price;
-
-                let bearish_pattern = self.klines[2].close_price < self.klines[2].open_price
-                    && self.klines[1].close_price < self.klines[1].open_price
-                    && self.klines[0].close_price < self.klines[0].open_price;
-
-                self.d_value = Some((self.klines[0].close_price - self.klines[2].open_price).abs());
-
-                if let Some(d_value) = self.d_value {
-                    if (d_value / self.klines[2].open_price)
-                        > self.entry_fee_percent + self.leave_fee_percent
-                    {
-                        let is_bullish = bullish_pattern
-                            && if self.ignore_ema {
-                                true
-                            } else {
-                                self.klines[0].close_price > ema
-                            }
-                            && if self.ignore_rsi {
-                                true
-                            } else {
-                                rsi < self.rsi_top && rsi > self.rsi_bottom
-                            };
-
-                        let is_bearish = bearish_pattern
-                            && if self.ignore_ema {
-                                true
-                            } else {
-                                self.klines[0].close_price < ema
-                            }
-                            && if self.ignore_rsi {
-                                true
-                            } else {
-                                rsi < self.rsi_top && rsi > self.rsi_bottom
-                            };
-
-                        let is_bullish_over_bought = bullish_pattern
-                            && if self.ignore_ema {
-                                true
-                            } else {
-                                self.klines[0].close_price > ema
-                            }
-                            && if self.ignore_rsi {
-                                true
-                            } else {
-                                rsi >= self.rsi_over_bought
-                            };
-
-                        let is_bearish_over_sell = bearish_pattern
-                            && if self.ignore_ema {
-                                true
-                            } else {
-                                self.klines[0].close_price < ema
-                            }
-                            && if self.ignore_rsi {
-                                true
-                            } else {
-                                rsi <= self.rsi_over_sell
-                            };
-
-                        let entry_price = self.klines[0].close_price;
-
-                        if is_bullish {
-                            self.enter_position(
-                                current_kline,
-                                entry_price,
-                                OrderSide::Buy,
-                                d_value,
-                            );
-                        } else if is_bearish {
-                            self.enter_position(
-                                current_kline,
-                                entry_price,
-                                OrderSide::Sell,
-                                d_value,
-                            );
-                        } else if is_bullish_over_bought && !self.ignore_rsi {
-                            self.enter_position(
-                                current_kline,
-                                entry_price,
-                                OrderSide::Sell,
-                                d_value,
-                            );
-                        } else if is_bearish_over_sell && !self.ignore_rsi {
-                            self.enter_position(
-                                current_kline,
-                                entry_price,
-                                OrderSide::Buy,
-                                d_value,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn enter_position(&mut self, kline: &KLine, price: f64, side: OrderSide, d_value: f64) {
-        self.has_order = true;
-
-        match side {
-            OrderSide::Buy => {
-                self.tp_price = Some(price + d_value * self.tp_percent);
-                self.sl_price = Some(price - d_value * self.sl_percent);
-            }
-            OrderSide::Sell => {
-                self.tp_price = Some(price - d_value * self.tp_percent);
-                self.sl_price = Some(price + d_value * self.sl_percent);
-            }
+        // 需要至少3根K线
+        if self.candles.len() < 3 {
+            return vec![];
         }
 
-        let mut record = self.trade_record.lock().unwrap();
-        record.entry(kline.start_time, price, side);
-    }
+        // 计算技术指标
+        let current_close = self.candles.back().unwrap().close;
+        let ema = self.ema.next(current_close);
+        let rsi = self.rsi.next(current_close);
 
-    fn leave(&mut self, current_kline: &KLine) {
-        if self.has_order {
-            if let (Some(tp_price), Some(sl_price)) = (self.tp_price, self.sl_price) {
-                if tp_price > current_kline.low_price && tp_price < current_kline.high_price {
-                    let mut record = self.trade_record.lock().unwrap();
-                    record.leave(current_kline.close_time, tp_price);
-                    self.has_order = false;
-                } else if sl_price > current_kline.low_price && sl_price < current_kline.high_price
-                {
-                    let mut record = self.trade_record.lock().unwrap();
-                    record.leave(current_kline.close_time, sl_price);
-                    self.has_order = false;
-                }
-            }
+        // 策略逻辑检查
+        let (is_bullish, is_bearish) = self.check_triple_bars();
+        let amplitude_ok = self.check_amplitude();
+        let rsi_in_range = rsi >= self.params.rsi_lower && rsi <= self.params.rsi_upper;
+
+        match (is_bullish, is_bearish, amplitude_ok, rsi_in_range) {
+            (true, false, true, true) => self.generate_signal(Order::buy()),
+            (false, true, true, true) => self.generate_signal(Order::sell()),
+            _ => vec![],
         }
     }
 }

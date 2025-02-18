@@ -1,10 +1,7 @@
-mod backtest;
-mod sdk;
 mod strategy;
+use strategy::three_bar::ThreeBarStrategy;
 
-use backtest::three_bar::run_backtest;
-
-#[tokio::main]
-async fn main() {
-    run_backtest().await;
+fn main() {
+    let strategy = ThreeBarStrategy;
+    println!("Strategy initialized");
 }
